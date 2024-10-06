@@ -39,6 +39,9 @@ class VimeoVideoPlayer extends StatefulWidget {
   /// Used in vimeo video public API call to get the video config
   final Options? dioOptionsForVimeoVideoConfig;
 
+  /// you need to add your vimeo token
+  final String token;
+
   const VimeoVideoPlayer({
     required this.url,
     this.systemUiOverlay = const [
@@ -56,6 +59,7 @@ class VimeoVideoPlayer extends StatefulWidget {
     this.onFinished,
     this.autoPlay = false,
     this.dioOptionsForVimeoVideoConfig,
+    required this.token,
     super.key,
   });
 
@@ -212,19 +216,20 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
   }
 
   void _videoPlayer() {
+    //! the response of vimeo api was changed
     /// getting the vimeo video configuration from api and setting managers
     _getVimeoVideoConfigFromUrl(widget.url).then((value) async {
-      final progressiveList = value?.request?.files?.progressive;
+      final progressiveList = value?.files;
 
       var vimeoMp4Video = '';
 
       if (progressiveList != null && progressiveList.isNotEmpty) {
         progressiveList.map((element) {
           if (element != null &&
-              element.url != null &&
-              element.url != '' &&
+              element.link != null &&
+              element.link != '' &&
               vimeoMp4Video == '') {
-            vimeoMp4Video = element.url ?? '';
+            vimeoMp4Video = element.link ?? '';
           }
         }).toList();
         if (vimeoMp4Video.isEmpty || vimeoMp4Video == '') {
@@ -264,9 +269,16 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
     required String vimeoVideoId,
   }) async {
     try {
+      Options dioOptions = Options(
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+        },
+      );
+
       Response responseData = await Dio().get(
-        'https://player.vimeo.com/video/$vimeoVideoId/config',
-        options: widget.dioOptionsForVimeoVideoConfig,
+        'https://api.vimeo.com/videos/$vimeoVideoId',
+        options: dioOptions,
+        // options: widget.dioOptionsForVimeoVideoConfig,
       );
       var vimeoVideo = VimeoVideoConfig.fromJson(responseData.data);
       return vimeoVideo;
