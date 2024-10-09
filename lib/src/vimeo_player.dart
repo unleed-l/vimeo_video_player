@@ -5,6 +5,7 @@ import 'package:flick_video_player/flick_video_player.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
+import 'package:vimeo_video_player/src/model/flick_portrait_with_settings_controls.dart';
 
 import 'model/vimeo_video_config.dart';
 
@@ -80,6 +81,24 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
   /// used to notify that video is loaded or not
   ValueNotifier<bool> isVimeoVideoLoaded = ValueNotifier(false);
 
+  /// used to notify that video is is playing or not
+  ValueNotifier<bool> isSettingsButtonVisible = ValueNotifier(true);
+
+  /// used to notify quality files
+  ValueNotifier<List<VimeoVideoFile>> files = ValueNotifier([]);
+
+  /// the current link of the vedio
+  String currentLink = '';
+  void updateCurrentLink(String newValue) {
+    setState(() {
+      currentLink = newValue;
+      // Reinitialize the video player with the new link
+      _videoPlayer(currentLink, _videoPlayerController!.value.position);
+      isVimeoVideoLoaded.value = !isVimeoVideoLoaded.value;
+      // This will trigger the whole screen to refresh because it modifies the state
+    });
+  }
+
   /// Vimeo video regexp
   final RegExp _vimeoRegExp = RegExp(
     r'^(?:http|https)?:?/?/?(?:www\.)?(?:player\.)?vimeo\.com/(?:channels/(?:\w+/)?|groups/[^/]*/videos/|video/|)(\d+)(?:|/\?)?$',
@@ -109,7 +128,7 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
             'Unable extract video id from given vimeo video url: ${widget.url}'));
       }
 
-      _videoPlayer();
+      if (currentLink == '') _videoPlayer('', Duration(seconds: 0));
     } else {
       throw (Exception('Invalid vimeo video url: ${widget.url}'));
     }
@@ -130,6 +149,8 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
     _videoPlayerController?.dispose();
     _emptyVideoPlayerController.dispose();
     isVimeoVideoLoaded.dispose();
+    isSettingsButtonVisible.dispose();
+    files.dispose();
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.manual,
       overlays: SystemUiOverlay.values,
@@ -152,9 +173,14 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
                       ),
                   systemUIOverlay: widget.systemUiOverlay,
                   preferredDeviceOrientation: widget.deviceOrientation,
-                  flickVideoWithControls: const FlickVideoWithControls(
+                  flickVideoWithControls: FlickVideoWithControls(
                     videoFit: BoxFit.fitWidth,
-                    controls: FlickPortraitControls(),
+                    controls: FlickPortraitWithSettingsControls(
+                      flickManager: _flickManager!,
+                      isSettingsButtonVisible: isSettingsButtonVisible,
+                      files: files,
+                      onUpdate: updateCurrentLink,
+                    ),
                   ),
                   flickVideoWithControlsFullscreen:
                       const FlickVideoWithControls(
@@ -170,20 +196,24 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
         ),
       ),
       onPopInvoked: (didPop) {
-        /// pausing the video before the navigator pop
+        /// Pausing the video before the navigator pop
         _videoPlayerController?.pause();
       },
     );
   }
 
-  void _setVideoInitialPosition() {
-    final Duration? startAt = widget.startAt;
+  void _setVideoInitialPosition(Duration goTo) {
+    Duration? startAt = widget.startAt;
+
+    if (goTo != Duration(seconds: 0)) {
+      startAt = goTo;
+    }
 
     if (startAt != null && _videoPlayerController != null) {
       _videoPlayerController!.addListener(() {
         final VideoPlayerValue videoData = _videoPlayerController!.value;
         if (videoData.isInitialized &&
-            videoData.duration > startAt &&
+            videoData.duration > startAt! &&
             !_isSeekedVideo) {
           _videoPlayerController!.seekTo(startAt);
           _isSeekedVideo = true;
@@ -213,25 +243,62 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
         }
       });
     }
+    _checkPlayingStatus();
   }
 
-  void _videoPlayer() {
+  void _checkPlayingStatus() {
+    Future.delayed(Duration(seconds: 1), () {
+      if (_videoPlayerController != null &&
+          _videoPlayerController!.value.isInitialized) {
+        VideoPlayerValue videoData = _videoPlayerController!.value;
+
+        // Update the visibility of the settings button based on playing status
+        if (videoData.isPlaying) {
+          isSettingsButtonVisible.value = false;
+        } else {
+          isSettingsButtonVisible.value = true;
+        }
+      }
+
+      // Continue checking the status recursively every second
+      _checkPlayingStatus();
+    });
+  }
+
+  void _videoPlayer(String link, Duration duration) {
     //! the response of vimeo api was changed
     /// getting the vimeo video configuration from api and setting managers
     _getVimeoVideoConfigFromUrl(widget.url).then((value) async {
       final progressiveList = value?.files;
 
+      List<VimeoVideoFile>? files = progressiveList;
+
       var vimeoMp4Video = '';
 
-      if (progressiveList != null && progressiveList.isNotEmpty) {
-        progressiveList.map((element) {
-          if (element != null &&
-              element.link != null &&
-              element.link != '' &&
-              vimeoMp4Video == '') {
-            vimeoMp4Video = element.link ?? '';
+
+      if (files != null && files.isNotEmpty) {
+        this.files.value = files;
+
+        // Filter valid links and convert to a list
+        var validLinks = files
+            .where(
+                (element) => element.link != null && element.link!.isNotEmpty)
+            .map((element) => element.link!)
+            .toList();
+
+        // Check if there are at least 2 valid links
+        if (link == '') {
+          if (validLinks.isNotEmpty) {
+            currentLink = validLinks[0]; // Get the first valid link
+          } else {
+            showAlertDialog(context);
+            return;
           }
-        }).toList();
+        } else {
+          currentLink = link;
+        }
+        vimeoMp4Video = currentLink;
+
         if (vimeoMp4Video.isEmpty || vimeoMp4Video == '') {
           showAlertDialog(context);
         }
@@ -239,7 +306,7 @@ class _VimeoVideoPlayerState extends State<VimeoVideoPlayer> {
 
       _videoPlayerController =
           VideoPlayerController.networkUrl(Uri.parse(vimeoMp4Video));
-      _setVideoInitialPosition();
+      _setVideoInitialPosition(duration);
       _setVideoListeners();
 
       _flickManager = FlickManager(
