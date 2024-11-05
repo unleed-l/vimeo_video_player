@@ -13,7 +13,8 @@ class VimeoVideoConfig {
     this.files,
   });
 
-  factory VimeoVideoConfig.fromJson(Map<String, dynamic> json) => VimeoVideoConfig(
+  factory VimeoVideoConfig.fromJson(Map<String, dynamic> json) =>
+      VimeoVideoConfig(
         uri: json['uri'],
         name: json['name'],
         description: json['description'],
@@ -80,7 +81,7 @@ class VimeoVideoFile {
         height: json['height'],
         link: json['link'],
         createdTime: json['created_time'],
-        fps: json['fps'],
+        fps: json['fps'] != null ? double.parse(json['fps'].toString()) : null,
         size: json['size'],
         md5: json['md5'],
         publicName: json['public_name'],
